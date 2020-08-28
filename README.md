@@ -1,2 +1,2 @@
-# Q-Learning-for-Hog
-A framework that trains top policies for famous cs61a hog contest
+# Hog trainer
+A framework that trains top agents for cs61a signature game - Hog
