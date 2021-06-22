@@ -1,10 +1,8 @@
 # Hog trainer
-Hog trainer trains top agents for cs61a signature game - Hog.
-
+Hog trainer generates top policies for cs61a's signature adversarial game Hog.
 
 ## Usage
-
-Follow the command prompt
+Just follow the prompt
 
 ## Contributing
-Pull requests are welcome. For source code and more, please notify me.
+Pull requests are welcome. Please notify me if you would like to commit.
