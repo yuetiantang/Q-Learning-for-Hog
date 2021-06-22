@@ -1,0 +1,3 @@
+"C:\Program Files\JetBrains\CLion 2021.1.2\bin\cmake\win\bin\cmake.exe" -E rm -f CMakeFiles\Hog_trainer.dir/objects.a
+C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin\ar.exe cr CMakeFiles\Hog_trainer.dir/objects.a @CMakeFiles\Hog_trainer.dir\objects1.rsp
+C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin\g++.exe -g -Wl,--whole-archive CMakeFiles\Hog_trainer.dir/objects.a -Wl,--no-whole-archive -o Hog_trainer.exe -Wl,--out-implib,libHog_trainer.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\Hog_trainer.dir\linklibs.rsp
