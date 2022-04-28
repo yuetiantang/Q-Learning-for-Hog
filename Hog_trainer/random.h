@@ -5,8 +5,12 @@
 #include <iostream>
 #include <windows.h>
 
+bool REAL_RANDOMNESS = true;
+
 void UpdateSeed() {
-    srand(GetCurrentTime() - rand());
+    if (REAL_RANDOMNESS) {
+        srand(GetCurrentTime() % 65536 - rand());
+    }
 }
 
 // 0 or 1, probability of 1 is nominator/dn

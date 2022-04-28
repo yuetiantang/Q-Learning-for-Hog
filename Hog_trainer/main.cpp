@@ -1,9 +1,7 @@
 #include <iostream>
 #include <windows.h>
-#include <conio.h>
 
 #include <fstream>
-#include <cmath>
 #include <io.h>
 #include <cstdlib>
 #include <filesystem>
@@ -13,13 +11,6 @@
 #include "util.h"
 
 const int GOAL_SCORE = 100;
-const unsigned long long PI[] = {3141592653, 5897932384, 6264338327, 9502884197, 1693993751,
-                           582097494, 4592307816, 4062862089, 9862803482, 5342117067, 9000000000};
-
-int piDigitAt(int i) {
-    long long divider = pow(10, (i / 10 + 1) * 10 - i - 1);
-    return PI[i / 10] / divider % 10;
-}
 
 // For Q-Learning
 unsigned long long Q[100][100][11] = {};
@@ -31,9 +22,11 @@ int delta_index = 0;
 int turn_num_sum = 0;
 
 // For battle mode only
-unsigned long long strategy0[100][100] = {};
-unsigned long long strategy1[100][100] = {};
-unsigned long long strategy2[100][100] = {};
+int strategy0[100][100] = {};
+int strategy1[100][100] = {};
+int strategy2[100][100] = {};
+string strategy1_name;
+string strategy2_name;
 
 // For stats only
 long long effective_time_consumed = 0;
@@ -46,7 +39,7 @@ string policy_name = "untitled";
 unsigned long long train_time = 0;
 double win_rate = 0;
 
-// Default parameters
+// Default parameters - saved
 unsigned long long EPISODE_PER_SEC = 200000;
 double DEFAULT_EPSILON = 0.01;
 double EPSILON = 0.01;
@@ -55,10 +48,20 @@ unsigned long long EPISODE_PER_EPOCH = 1000000;
 double CONSERVATIVITY = 0.01;
 int CONSERVATIVE_LEARNING = 0;
 int REVERSE_MODE = 0;
+double EVE_WINNING_THRESHOLD = 0.55;
+unsigned int EVE_DEFAULT_ROUND_MINIMUM = 10000000;
+unsigned int EVE_DEFAULT_ROUND_MAXIMUM = 50000000;
+
+// Default parameters - unsaved
+int AUTO_LEARNING = 0;
+int AUTO_NORMALIZING = 0;// beta
+
+string title = "Hog Trainer";
+string version = "1.28.3";
 
 void clean() {
     system("cls");
-    header("Hog Trainer","1.27.0");
+    header(title, version);
     cout << "\n";
 }
 
@@ -83,20 +86,7 @@ int roll_dice(int num_rolls=1, int dice_side=6) {
 
 // Mutating
 int free_bacon(int score1) {
-    if (score1 == 0) {
-        return 3;
-    }
-    int square = score1 * score1;
-    int result = 9;
-    int digit;
-    while (square != 0) {
-        digit = square % 10;
-        square /= 10;
-        if (digit < result) {
-            result = digit;
-        }
-    }
-    return result + 3;
+    return abs(score1 / 10 - score1 % 10) + 4;
 }
 
 // Mutating
@@ -127,22 +117,36 @@ bool is_swap(int score0, int score1) {
 
 // Mutating
 //Return whether the player gets an extra turn.
-//player_score:   The total score of the current player.
-//opponent_score: The total score of the other player.
 bool more_boar(int score0, int score1) {
-    int score0d2 = score0;
-    int score1d2 = score1;
-    while (score0d2 > 99) {
-        score0d2 /= 10;
-    }
-    while (score1d2 > 99) {
-        score1d2 /= 10;
-    }
-    return score0d2 / 10 < score1d2 / 10 and score0d2 % 10 < score1d2 % 10;
+    int min_digit_0 = 9;
+    int min_digit_1 = 9;
+    int max_digit_0 = 0;
+    int max_digit_1 = 0;
+    int digit;
+    do {
+        digit = score0 % 10;
+        score0 /= 10;
+        if (digit < min_digit_0) {
+            min_digit_0 = digit;
+        }
+        if (digit > max_digit_0) {
+            max_digit_0 = digit;
+        }
+    } while (score0 != 0);
+    do {
+        digit = score1 % 10;
+        score1 /= 10;
+        if (digit < min_digit_1) {
+            min_digit_1 = digit;
+        }
+        if (digit > max_digit_1) {
+            max_digit_1 = digit;
+        }
+    } while (score1 != 0);
+    return min_digit_0 < min_digit_1 && max_digit_0 > max_digit_1;
 }
 
 // Mutating
-
 bool pig_pass(int score0, int score1) {
     return (score1 - score0) == 1 or (score1 - score0) == 2;
 }
@@ -162,14 +166,12 @@ int other(int player) {
 }
 
 // Mutating
-/*
 int feral_hog(int curr_roll, int last_roll) {
 	if (abs(curr_roll - last_roll) == 2) {
 		return 3;
 	}
 	return 0;
 }
-*/
 
 // Mutating
 int play(int (*strategy0) (int, int), int (*strategy1) (int, int), int first) {
@@ -178,7 +180,7 @@ int play(int (*strategy0) (int, int), int (*strategy1) (int, int), int first) {
     int score1 = 0;
 
     int turn = first;
-    int round = 0;
+    int round = -1;
     int curr_roll = 0;
     int dice_side = 6;
     bool extra = false;
@@ -233,12 +235,14 @@ int always_roll_6(int score0, int score1) {
 
 double average_win_rate(int (*strategy) (int, int), int (*baseline) (int, int)) {
     int win_count = 0;
+    REAL_RANDOMNESS = false;
     for (int i = 0; i < 100000; i++) {
         win_count += other(play(strategy, baseline, 0));
     }
     for (int i = 0; i < 100000; i++) {
         win_count += other(play(strategy, baseline, 1));
     }
+    REAL_RANDOMNESS = true;
     return (double)win_count / 200000;
 }
 
@@ -447,6 +451,35 @@ void loadConfig() {
         }
     }
     infile.close();
+    infile.open("./config/eve");
+    if (!infile) {
+        ofstream outfile;
+        outfile.open("./config/eve", ios::out);
+        outfile << "EVE_WIN_RATE_THRESHOLD = " << EVE_WINNING_THRESHOLD << endl;
+        outfile << "EVE_DEFAULT_ROUND_MINIMUM = " << EVE_DEFAULT_ROUND_MINIMUM << endl;
+        outfile << "EVE_DEFAULT_ROUND_MAXIMUM = " << EVE_DEFAULT_ROUND_MAXIMUM << endl;
+        outfile.close();
+    } else {
+        while (!infile.eof()) {
+            infile >> parser;
+            if (parser == "EVE_WIN_RATE_THRESHOLD") {
+                infile >> parser;
+                if (parser == "=") {
+                    infile >> EVE_WINNING_THRESHOLD;
+                }
+            } else if (parser == "EVE_DEFAULT_ROUND_MINIMUM") {
+                infile >> parser;
+                if (parser == "=") {
+                    infile >> EVE_DEFAULT_ROUND_MINIMUM;
+                }
+            } else if (parser == "EVE_DEFAULT_ROUND_MAXIMUM") {
+                infile >> parser;
+                if (parser == "=") {
+                    infile >> EVE_DEFAULT_ROUND_MAXIMUM;
+                }
+            }
+        }
+    }
 }
 
 void saveInfo() {
@@ -471,6 +504,11 @@ void saveConfig() {
     outfile << "CONSERVATIVITY = " << CONSERVATIVITY << endl;
     outfile << "CONSERVATIVE_LEARNING = " << CONSERVATIVE_LEARNING << endl;
     outfile << "REVERSE_MODE = " << REVERSE_MODE << endl;
+    outfile.close();
+    outfile.open("./config/eve", ios::out);
+    outfile << "EVE_WIN_RATE_THRESHOLD = " << EVE_WINNING_THRESHOLD << endl;
+    outfile << "EVE_DEFAULT_ROUND_MINIMUM = " << EVE_DEFAULT_ROUND_MINIMUM << endl;
+    outfile << "EVE_DEFAULT_ROUND_MAXIMUM = " << EVE_DEFAULT_ROUND_MAXIMUM << endl;
     outfile.close();
 }
 
@@ -510,12 +548,16 @@ void normalizeQN(int scale) {
         for (int score1 = 0; score1 < 100; score1++) {
             for (int choice = 0; choice < 11; choice++) {
                 if (N[score0][score1][choice] >= (long long)scale) {
-                    Q[score0][score1][choice] = (int)((double)Q[score0][score1][choice] / (double)N[score0][score1][choice] * scale);
+                    Q[score0][score1][choice] = (long long)((double)scale * (double)Q[score0][score1][choice] / (double)N[score0][score1][choice]);
                     N[score0][score1][choice] = scale;
                 }
             }
         }
     }
+}
+
+void normalizeAndSave(int scale) {
+    normalizeQN(scale);
     mkdir("./strategy");
     saveQ("./strategy/Q");
     saveN("./strategy/N");
@@ -622,14 +664,18 @@ void eveSetup(bool deep) {
         } else {
             int element;
             bool valid_file = false;
-            // todo: policy names
+            string name;
             while (!infile.eof()) {
                 infile >> parser;
                 if (parser == '=') {
                     valid_file = true;
                     break;
                 }
+                if (parser != ' ') {
+                    name += parser;
+                }
             }
+            strategy1_name = name;
             if (!valid_file) {
                 for (int score0 = 0; score0 < 100; score0++) {
                     for (int score1 = 0; score1 < 100; score1++) {
@@ -673,13 +719,18 @@ void eveSetup(bool deep) {
         } else {
             int element;
             bool valid_file = false;
+            string name;
             while (!infile.eof()) {
                 infile >> parser;
                 if (parser == '=') {
                     valid_file = true;
                     break;
                 }
+                if (parser != ' ') {
+                    name += parser;
+                }
             }
+            strategy2_name = name;
             if (!valid_file) {
                 for (int score0 = 0; score0 < 100; score0++) {
                     for (int score1 = 0; score1 < 100; score1++) {
@@ -757,24 +808,24 @@ int playerStrategy(int score0, int score1) {
 /*
  * 3 strategies for battle mode:
  */
-int eve0Strategy(int score0, int score1) {
+int eveStrategy0(int score0, int score1) {
     return strategy0[score0][score1];
 }
 
-int eve1Strategy(int score0, int score1) {
+int eveStrategy1(int score0, int score1) {
     return strategy1[score0][score1];
 }
 
-int eve2Strategy(int score0, int score1) {
+int eveStrategy2(int score0, int score1) {
     return strategy2[score0][score1];
 }
 
 int old_QStrategy(int score0, int score1) {
     int decision = 0;
-    double highestQ = old_Q[score0][score1][0] / old_N[score0][score1][0];
+    double highestQ = (double)old_Q[score0][score1][0] / (double)old_N[score0][score1][0];
     double q;
     for (int i = 1; i <= 10; i++) {
-        q = old_Q[score0][score1][i] / old_N[score0][score1][i];
+        q = (double)old_Q[score0][score1][i] / (double)old_N[score0][score1][i];
         if (q > highestQ) {
             decision = i;
             highestQ = q;
@@ -840,20 +891,21 @@ double evolveToNextEpoch(long long episode) {
     effective_time_consumed = 0;
     total_time_consumed = GetCurrentTime();
     int reward;
-    loadQ();
-    loadN();
     turn_num_sum = 0;
     total_episode_counter = 0;
     episode_counter = 0;
     if (CONSERVATIVE_LEARNING) {
         conserve();
     }
+    if (AUTO_NORMALIZING) {
+        normalizeQN(1000000);
+    }
     for (long long i = 1; i <= episode; i++) {
         //Run i (==EPISODE) episodes.
         effective_time_consumed -= GetCurrentTime();
         //Timer begins.
-        reward = play(QLStrategy, QStrategy, i % 2) == 0 ? 1 : -1;
-        REVERSE_MODE ? reward *= -1 : NULL ;
+        reward = play(QLStrategy, QStrategy, (int)(i % 2)) == 0 ? 1 : -1;
+        reward *= REVERSE_MODE ? -1 : 1;
         //play() a game and get a REWARD.
         effective_time_consumed += GetCurrentTime();
         //Timer stops.
@@ -865,9 +917,7 @@ double evolveToNextEpoch(long long episode) {
         //Reset DELTA_INTEX to position 0 so that it is ready for next episode.
         if (i % kilo_episode == 0) {
             //Every MILLI (==EPISODE/1000) episodes, refresh UI and progress percentage.
-            cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b               ";
-            cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b";
-            cout << "学习进度：" << ((double)i / episode) * 100 << "%...";
+            cout << "\r学习进度：" << ((double)i / (double)episode) * 100 << "%...  ";
         }
         if (DYNAMIC_EPSILON && i % 100000 == 0) {
             //If in dynamic mode, every 100000 episodes, update EPSILON, and reset TURN_NUM_SUM to 0.
@@ -895,7 +945,7 @@ double evolveToNextEpoch(long long episode) {
     saveN("./strategy/N");
     saveInfo();
     total_time_consumed = GetCurrentTime() - total_time_consumed;
-    return (double) (100 * effective_time_consumed) / total_time_consumed;
+    return (double) (100 * effective_time_consumed) / (double)total_time_consumed;
 }
 
 // Mutating
@@ -906,7 +956,7 @@ void pve(int (*player) (int, int), int (*ai) (int, int)) {
     int score1 = 0;
     int curr_roll = 0;
     int dice_side = 6;
-    int round = 0;
+    int round = -1;
     bool extra = false;
 
     int score_this_turn = 0;
@@ -974,8 +1024,91 @@ void pve(int (*player) (int, int), int (*ai) (int, int)) {
     }
 }
 
-int eve() {
-    return 0;
+int eve(const string& str0_name, int (*str0) (int, int), const string& str1_name, int (*str1) (int, int)) {
+    long long str0_win_counter = 0;
+    long long str1_win_counter = 0;
+    long long round_counter = 0;
+    int first_hand = 0;
+    double str0_win_rate;
+    int bar_length = 100;
+    int one_set = 20000;
+    int color_value;
+    while (round_counter < EVE_DEFAULT_ROUND_MINIMUM ||
+            (double)abs(str0_win_counter - str1_win_counter) < 2 * (EVE_WINNING_THRESHOLD - 0.5) * EVE_DEFAULT_ROUND_MINIMUM) {
+        for (int i = 0; i < one_set; i++) {
+            play(str0, str1, first_hand) == 0 ? str0_win_counter++ : str1_win_counter++;
+            first_hand = other(first_hand);
+        }
+        round_counter += one_set;
+        str0_win_rate = (double)str0_win_counter / (double)round_counter;
+        cout << str0_name << "得分：" << str0_win_counter << "     " << str1_name << "得分：" << str1_win_counter << endl;
+        cout << str0_name << "胜率：" << str0_win_rate * 100 << "%     " << str1_name << "胜率：" << (1 - str0_win_rate) * 100 << "%          \n";
+        for(int i = 0; i < bar_length; i++) {
+            if (round_counter < EVE_DEFAULT_ROUND_MINIMUM) {
+                if (i < (double)str0_win_counter / EVE_DEFAULT_ROUND_MINIMUM * bar_length) {
+                    color_value = 176;
+                } else if (bar_length - i - 1 < (double)str1_win_counter / EVE_DEFAULT_ROUND_MINIMUM * bar_length) {
+                    color_value = 192;
+                } else {
+                    color_value = 128;
+                }
+            } else {
+                if (i < ((double)(str0_win_counter - str1_win_counter) /
+                    (double)(2 * (EVE_WINNING_THRESHOLD - 0.5) * EVE_DEFAULT_ROUND_MINIMUM) + 1) / 2 * bar_length) {
+                    color_value = 176;
+                } else {
+                    color_value = 192;
+                }
+            }
+            if (i == 49) {
+                color_value += 4096;
+            }
+            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color_value);
+            cout << " "; // display bar
+        }
+        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),15);
+        cout << "\n\x1b[A\x1b[A\x1b[A";
+        if (round_counter >= EVE_DEFAULT_ROUND_MAXIMUM) {
+            break;
+        }
+    }
+    cout << "\n\n\n";
+    if (round_counter == EVE_DEFAULT_ROUND_MINIMUM) {
+        if (str0_win_rate > 0.5) {
+            cout << str0_name << "吊打" << str1_name << "。\n";
+            return 0;
+        } else {
+            cout << str1_name << "吊打" << str0_name << "。\n";
+            return 4;
+        }
+    } else if (round_counter < EVE_DEFAULT_ROUND_MAXIMUM) {
+        if (str0_win_rate > 0.5) {
+            cout << str0_name << "战胜" << str1_name << "。\n";
+            return 1;
+        } else {
+            cout << str1_name << "战胜" << str0_name << "。\n";
+            return 3;
+        }
+    } else {
+        cout << "平局。\n";
+        return 2;
+    }
+}
+
+void debugMessage() {
+    /*
+    cout << (double) 76637208 / 138099015 * 1000000 << endl;
+    cout << (double) 56641378 / 116262538 * 1000000 << endl;
+    cout << (double) 61782990 / 116445194 * 1000000<< endl;
+    cout << (double) 71020789 / 128814647 * 1000000<< endl;
+    cout << (double) 65510124 / 119645438 * 1000000<< endl;
+    cout << (double) 64912330 / 119405973 * 1000000<< endl;
+    cout << (double) 1434583879 / 2568176280 * 1000000<< endl;
+    cout << (double) 3890292457 / 6964353426 * 1000000<< endl;
+    cout << (double) 66854088 / 122408978 * 1000000<< endl;
+    cout << (double) 67241513 / 123350177 * 1000000<< endl;
+    cout << (double) 68484321 / 124823334 * 1000000<< endl;
+     */
 }
 
 //-----------------UI-------------------//
@@ -988,9 +1121,10 @@ void showMenu(string currentStage) {
     message = "";
     if (currentStage == "mainMenu") {
         clean();
+        debugMessage();
         cout << "这里是萌萌哒的QLearner~ ╰ (￣▽￣)╭ \n";
         cout << "欢迎回来学习~ (￣_,￣ )\n";
-        cout << "游戏规则：Spring 21 Contest\n";
+        cout << "游戏规则：Summer 2021 [Contest]\n";
         cout << "当前时间：";
         displayLocalTime();
         cout << endl;
@@ -1028,12 +1162,15 @@ void showMenu(string currentStage) {
         cout << "          2.优化了AI在挑战模式的评价算法。\n";
         cout << "  1.26.4: 1.修复了一个挑战模式AI评价算法的bug。\n";
         cout << "          2.新增了always_rolls(6)胜率测试。\n";
-        cout << "  1.26.5: 1.新增了反转训练模式——练出一个只输不赢的人工智障，能输给它算你狠(狗头)。\n";
+        cout << "  1.26.5: 1.新增了反转训练模式——练出一个只输不赢的人工智障(狗头)。\n";
         cout << "  1.27.0: 1.源代码重构。\n";
         cout << "          2.修复了学习算法中的一个bug，现在Q值收敛得更快。\n";
-        cout << "  1.27.1: (开发中)1.AI对决模式\n";
-        cout << "          (开发中)2.更新至2021 Summer规则。\n";
-        cout << "          (开发中)3.DP算法。\n";
+        cout << "  1.28.0: 1.AI对决模式上线\n";
+        cout << "          2.更新规则至 Summer 2021 [Contest]。\n";
+        cout << "  1.28.1: 1.修复了对决模式UI的一些bug。\n";
+        cout << "  1.28.2: 1.新增自动学习功能。\n";
+        cout << "  1.28.3: 1.新增自动标准化功能。\n";
+        cout << "  1.29.0: （即将上线）1.DP算法。\n";
         cout << endl;
         cout << "菜单:[1]爪巴回主面板\n";
         input = requireSelection("1");
@@ -1049,14 +1186,19 @@ void showMenu(string currentStage) {
         cout << "Epoch长度：" << EPISODE_PER_EPOCH << endl;
         cout << "保守系数：" << CONSERVATIVITY << endl;
         cout << "保守模式：" << ((CONSERVATIVE_LEARNING == 1) ? "开" : "关") << endl;
+        cout << "自动学习：" << ((AUTO_LEARNING == 1) ? "开" : "关") << endl;
+        cout << "自动标准化：" << (AUTO_NORMALIZING ? "开" : "关") << endl;
         if (REVERSE_MODE) cout << "警告：反向学习已启动！" << endl;
+
         cout << endl;
         cout << "菜单:[1]爪巴回主面板\n";
         cout << "     [2]" << ((DYNAMIC_EPSILON == 1) ? "关闭" : "开启") << "动态Epsilon\n";
         cout << "     [3]切换学习模式为 " << ((CONSERVATIVE_LEARNING == 1) ? "自由" : "保守") << "\n";
         cout << "     [4]切换学习模式为 " << ((REVERSE_MODE == 1) ? "正向" : "反向") << "\n";
-        cout << "     [5]学习！！\n";
-        input = requireSelection("12345");
+        cout << "     [5]" << ((AUTO_LEARNING == 1) ? "关闭" : "开启") << "自动学习\n";
+        cout << "     [6]" << ((AUTO_NORMALIZING == 1) ? "关闭" : "开启") << "自动标准化\n";
+        cout << "     [7]学习！！\n";
+        input = requireSelection("1234567");
         if (input == '1') {
             currentStage = "mainMenu";
             goto refreshStage;
@@ -1073,6 +1215,12 @@ void showMenu(string currentStage) {
             saveConfig();
             goto refreshStage;
         } else if (input == '5') {
+            AUTO_LEARNING = 1 - AUTO_LEARNING;
+            goto refreshStage;
+        } else if (input == '6') {
+            AUTO_NORMALIZING = 1 - AUTO_NORMALIZING;
+            goto refreshStage;
+        } else if (input == '7') {
             currentStage = "qLearn";
             goto refreshStage;
         }
@@ -1090,7 +1238,7 @@ void showMenu(string currentStage) {
         cout << endl;
         cout << "菜单:[1]爪巴回主面板\n";
         cout << "     [2]导出策略\n";
-        cout << "     [3]标准化(N=100000)\n";
+        cout << "     [3]标准化(N=1000000)\n";
         cout << "     [4]学习！！\n";
         input = requireSelection("1234");
         if (input == '1') {
@@ -1101,7 +1249,7 @@ void showMenu(string currentStage) {
             goto strategyInfo;
         } else if (input == '3') {
             message = dumpCurrentStrategy();
-            normalizeQN(100000);
+            normalizeAndSave(1000000);
             goto strategyInfo;
         } else if (input == '4') {
             currentStage = "qLearn";
@@ -1149,35 +1297,94 @@ void showMenu(string currentStage) {
             currentStage = "qLearn";
             goto refreshStage;
         }
-    } else if (currentStage == "eve") { //todo
+    } else if (currentStage == "eve") {
+        int data_0v1[5] = {0, 0, 0, 0, 0};
+        int data_0v2[5] = {0, 0, 0, 0, 0};
+        int data_1v2[5] = {0, 0, 0, 0, 0};
+        int result = 0;
+        eve:;
         clean();
-        cout << "欢迎进入人工智障对决模式~\n";
-        cout << "正在导入策略……";
-        eveSetup(true);
-        cout << "已完成。";
-        cout << "左：";
-
-        //todo
-
-        cout << endl;
+        cout << "初始化人工智障竞技场……已完成。\n";
+        if (message.empty()) {
+            cout << "正在导入策略……";
+            eveSetup(true);
+            cout << "已完成。";
+        } else if (message == "reload"){
+            cout << "正在重载策略……";
+            eveSetup(true);
+            for (int i = 0; i < 5; i++) {
+                data_0v1[i] = 0;
+                data_0v2[i] = 0;
+                data_1v2[i] = 0;
+            }
+            cout << "已重载。";
+        }
+        cout << "0号位：" << policy_name << endl;
+        cout << "1号位：" << strategy1_name << endl;
+        cout << "2号位：" << strategy2_name << endl;
+        if (message == "1v2") {
+            cout << "对决中：" << strategy1_name << " vs. " << strategy2_name << endl;
+            result = eve(strategy1_name, eveStrategy1, strategy2_name, eveStrategy2);
+            data_1v2[result] += 1;
+        } else if (message == "0v1") {
+            cout << "对决中：" << policy_name << " vs. " << strategy1_name << endl;
+            result = eve(policy_name, eveStrategy0, strategy1_name, eveStrategy1);
+            data_0v1[result] += 1;
+        } else if (message == "0v2") {
+            cout << "对决中：" << policy_name << " vs. " << strategy2_name << endl;
+            result = eve(policy_name, eveStrategy0, strategy2_name, eveStrategy2);
+            data_0v2[result] += 1;
+        }
+        cout << "\n";
         cout << "菜单:[1]爪巴回主面板\n";
-        cout << "     [2]再打一架叭>_<\n";
-        cout << "     [3]学习！！\n";
-        input = requireSelection("123");
+        cout << "     [2]重载1/2号位策略\n";
+        cout << "     [3]1 vs. 2  [ ";
+        for (int i = 0; i < 5; i++) {
+            cout << data_1v2[i];
+            if (i != 4) {
+                cout << " - ";
+            }
+        }
+        cout << " ]\n";
+        cout << "     [4]0 vs. 1  [ ";
+        for (int i = 0; i < 5; i++) {
+            cout << data_0v1[i];
+            if (i != 4) {
+                cout << " - ";
+            }
+        }
+        cout << " ]\n";
+        cout << "     [5]0 vs. 2  [ ";
+        for (int i = 0; i < 5; i++) {
+            cout << data_0v2[i];
+            if (i != 4) {
+                cout << " - ";
+            }
+        }
+        cout << " ]\n";
+        input = requireSelection("12345");
         if (input == '1') {
             currentStage = "mainMenu";
             goto refreshStage;
         } else if (input == '2') {
-            currentStage = "pve";
-            goto refreshStage;
+            message = "reload";
+            goto eve;
         } else if (input == '3') {
-            currentStage = "qLearn";
-            goto refreshStage;
+            message = "1v2";
+            goto eve;
+        } else if (input == '4') {
+            message = "0v1";
+            goto eve;
+        } else if (input == '5') {
+            message = "0v2";
+            goto eve;
         }
     } else if (currentStage == "qLearn") {
         clean();
         string task_name;
-        long long speed_test = 0; // debug only
+        long long speed_test = 0;
+        unsigned long long auto_epoch_counter = 0;
+        unsigned long long auto_episode_counter = 0;
         cout << "Q-Learning模块准备就绪\n请指定训练时长 (＠_＠;)\n";
         cout << "若是第一次使用本机学习，请选[2]以测试机器算力（手动滑稽）\n";
         cout << endl;
@@ -1244,15 +1451,25 @@ void showMenu(string currentStage) {
                 break;
         }
         clean();
+        auto_learning_flag:;
         cout << "Q-Learning运行中……o(≧口≦)o\n";
         cout << "正在学习：" << task_name << endl;
-        cout << "Episode计数：" << parameter / (double)1000000 << "MEpisodes\n";
+        cout << "Episode计数：" << (double)parameter / 1000000 << "MEpisodes\n";
         cout << "开始时间：";
         displayLocalTime();
         if (speed_test) {
             speed_test = GetCurrentTime();
         }
         double efficiency = evolveToNextEpoch(parameter);
+        if (AUTO_LEARNING) {
+            auto_episode_counter += total_episode_counter;
+            cout << "\n已完成" << ++auto_epoch_counter << "个[" << task_name << "]\n";
+            cout << "学习效率：" << efficiency << "% (强化学习算法运行占全部训练时间的比例)     \n";
+            cout << "已完成Episode：" << (double)auto_episode_counter / (double)1000000 << "MEpisodes          \n";
+            cout << "正在自动学习，根本停不下来~QAQ\r";
+            cout << "\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A";
+            goto auto_learning_flag;
+        }
         if (speed_test) {
             speed_test = (GetCurrentTime() - speed_test) / 1000;
             EPISODE_PER_SEC = (parameter / speed_test);
@@ -1262,8 +1479,8 @@ void showMenu(string currentStage) {
         cout << "学习完成！";
         displayLocalTime();
         cout << "学习效率：" << efficiency << "% (强化学习算法运行占全部训练时间的比例)\n";
-        cout << "收获率：" << (double)total_episode_counter / parameter * 100 << "% (计入当前策略的episode比例)\n";
-        cout << "有效Episode计数：" << total_episode_counter / (double)1000000 << "MEpisodes\n";
+        cout << "收获率：" << (double)total_episode_counter / (double)parameter * 100 << "% (计入当前策略的episode比例)\n";
+        cout << "有效Episode计数：" << (double)total_episode_counter / (double)1000000 << "MEpisodes\n";
         cout << endl;
         cout << "菜单:[1]返回主面板\n";
         cout << "     [2]再来一发！\n";
@@ -1282,9 +1499,6 @@ void showMenu(string currentStage) {
 int main(int argc, char** argv) {
     cout << "诶诶我被启动了？等等我~~Σ(っ°Д°;)っ\n";
     setup();
-    //
-    eveSetup(true);
-    //
     showMenu("mainMenu");
     return 0;
 }
