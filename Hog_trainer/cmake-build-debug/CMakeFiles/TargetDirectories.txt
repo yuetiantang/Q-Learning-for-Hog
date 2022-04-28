@@ -1,3 +1,0 @@
-C:/Users/15109/CLionProjects/Hog_trainer/cmake-build-debug/CMakeFiles/Hog_trainer.dir
-C:/Users/15109/CLionProjects/Hog_trainer/cmake-build-debug/CMakeFiles/edit_cache.dir
-C:/Users/15109/CLionProjects/Hog_trainer/cmake-build-debug/CMakeFiles/rebuild_cache.dir
